@@ -42,6 +42,7 @@
   /* list */
   .ment{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 12px 10px}
   .ment+.ment{margin-top:10px}
+  .ment.pick{border:2px solid var(--pri)}
   .ment .txt{white-space:pre-wrap;word-break:break-all}
   .ment .meta{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:8px}
   .ment .tag{font-size:12px;color:var(--pri);background:var(--pri-weak);padding:2px 8px;border-radius:99px}
@@ -130,7 +131,7 @@
       </div>
       <div>
         <label class="t">분류 (선택)</label>
-        <input type="text" id="addCat" placeholder="예: 공지, 감사, 상담, 출결" list="catList">
+        <input type="text" id="addCat" placeholder="비워 두면 자동 분류 (건강·시험·출결·행사 등)" list="catList">
         <div class="chips" id="addCatChips" style="margin-top:8px"></div>
       </div>
       <button class="btn full" id="addBtn">맞춤법 검사 후 저장</button>
@@ -235,7 +236,7 @@
 <div class="mask" id="editMask"><div class="modal stack">
   <h2>멘트 수정</h2>
   <textarea id="editText" style="min-height:140px"></textarea>
-  <input type="text" id="editCat" placeholder="분류 (선택)" list="catList">
+  <input type="text" id="editCat" placeholder="분류 (비워 두면 자동 분류)" list="catList">
   <div class="row">
     <button class="btn gray" id="editCancel">취소</button>
     <button class="btn" style="flex:1" id="editSave">맞춤법 검사 후 저장</button>
@@ -295,6 +296,24 @@
       try { ok=document.execCommand('copy'); } catch {}
       ta.remove(); return ok;
     }
+  }
+
+  /* ---------- 자동 분류 (키워드 기반, 위에서부터 먼저 맞는 것) ---------- */
+  const CAT_RULES = [
+    ['건강', ['감기','독감','코로나','발열','열이','기침','아파','아픈','병원','진료','보건','감염','장염','다쳐','다친','부상']],
+    ['시험', ['시험','고사','지필','수행평가','평가','성적']],
+    ['출결', ['지각','결석','조퇴','출석','출결']],
+    ['행사', ['체험학습','소풍','수학여행','수련회','축제','체육대회','운동회','행사','견학','졸업식','입학식','방학식','개학']],
+    ['상담', ['상담','면담']],
+    ['제출', ['가정통신문','제출','신청서','동의서']],
+    ['준비물', ['준비물','챙겨','지참']],
+    ['감사', ['고맙','덕분','감사의']],
+    ['안부', ['잘 지내','환절기','날씨','명절','추석','설날','새해','연휴','건강하시','건강히','평안']],
+  ];
+  const CAT_FIXED = ['안부','건강','안내','시험','출결','행사','상담','제출','준비물','감사'];
+  function autoCat(text){
+    for (const [cat, words] of CAT_RULES) if (words.some(w => text.includes(w))) return cat;
+    return '안내';
   }
 
   /* ---------- 바른한글(부산대) 검사기 열기 ---------- */
@@ -476,10 +495,11 @@
     const final = await checkBeforeSave(t, $('#addBtn'));
     if (final===null) return;
     const now = Date.now();
-    items.unshift({ id:uid(), text:final.trim(), cat:$('#addCat').value.trim(), uses:0, createdAt:now, updatedAt:now });
+    const cat = $('#addCat').value.trim() || autoCat(final);
+    items.unshift({ id:uid(), text:final.trim(), cat, uses:0, createdAt:now, updatedAt:now });
     saveItems();
     addText.value=''; $('#addCat').value=''; $('#addCount').textContent='0자';
-    toast('저장했어요'); go('list');
+    toast('저장했어요 · 분류: '+cat); go('list');
   };
   function cats(){ return [...new Set(items.map(i=>i.cat).filter(Boolean))]; }
   function renderAddCats(){
@@ -497,14 +517,19 @@
 
   function renderList(){
     const cs = cats();
-    if (catSel!=='전체' && !cs.includes(catSel)) catSel='전체';
-    $('#catFilter').innerHTML = cs.length ? ['전체',...cs].map(c=>`<button class="chip ${c===catSel?'on':''}" data-c="${esc(c)}">${esc(c)}</button>`).join('') : '';
+    // 고정 분류 버튼 + 직접 만든 분류
+    const btnCats = [...CAT_FIXED, ...cs.filter(c=>!CAT_FIXED.includes(c))];
+    if (catSel!=='전체' && !btnCats.includes(catSel)) catSel='전체';
+    const cnt = c => items.filter(i=>i.cat===c).length;
+    $('#catFilter').innerHTML = ['전체',...btnCats].map(c=>`<button class="chip ${c===catSel?'on':''}" data-c="${esc(c)}">${esc(c)}${c!=='전체'&&cnt(c)?` ${cnt(c)}`:''}</button>`).join('');
     $$('#catFilter .chip').forEach(b=>b.onclick=()=>{ catSel=b.dataset.c; renderList(); });
     $('#catList').innerHTML = cs.map(c=>`<option value="${esc(c)}">`).join('');
 
     const q = $('#q').value.trim();
-    let arr = items.filter(i => (catSel==='전체'||i.cat===catSel) && (!q || i.text.includes(q) || (i.cat||'').includes(q)));
+    let arr = items.filter(i => !q || i.text.includes(q) || (i.cat||'').includes(q));
     arr.sort(sortMode==='uses' ? (a,b)=>(b.uses-a.uses)||(b.updatedAt-a.updatedAt) : (a,b)=>b.updatedAt-a.updatedAt);
+    // 선택한 분류의 멘트를 맨 위로 (나머지는 아래에 그대로)
+    if (catSel!=='전체') arr = [...arr.filter(i=>i.cat===catSel), ...arr.filter(i=>i.cat!==catSel)];
     $('#listCount').textContent = `${arr.length}개`;
 
     if (!items.length){
@@ -514,7 +539,7 @@
     if (!arr.length){ $('#list').innerHTML = `<div class="empty">검색 결과가 없어요.</div>`; return; }
 
     $('#list').innerHTML = arr.map(i=>`
-      <div class="ment" data-id="${i.id}">
+      <div class="ment${catSel!=='전체'&&i.cat===catSel?' pick':''}" data-id="${i.id}">
         <div class="txt">${esc(i.text)}</div>
         <div class="meta">
           <div>${i.cat?`<span class="tag">${esc(i.cat)}</span>`:''}</div>
@@ -557,7 +582,7 @@
     $('#editMask').classList.remove('on');
     const final = await checkBeforeSave(t, $('#editSave'));
     if (final===null){ $('#editMask').classList.add('on'); return; }
-    it.text=final.trim(); it.cat=$('#editCat').value.trim(); it.updatedAt=Date.now();
+    it.text=final.trim(); it.cat=$('#editCat').value.trim() || autoCat(it.text); it.updatedAt=Date.now();
     saveItems(); renderList(); toast('수정했어요');
   };
 
@@ -623,8 +648,9 @@
         // 제안문은 이미 AI가 맞춤법을 지켜 작성 — 사용자가 고쳤을 수 있으니 저장 전 검사
         const final = await checkBeforeSave(t, b); if (final===null) return;
         const now=Date.now();
-        items.unshift({ id:uid(), text:final.trim(), cat:'', uses:0, createdAt:now, updatedAt:now });
-        saveItems(); b.textContent='저장됨 ✓'; b.disabled=true; toast('멘트함에 저장했어요');
+        const cat = autoCat(final);
+        items.unshift({ id:uid(), text:final.trim(), cat, uses:0, createdAt:now, updatedAt:now });
+        saveItems(); b.textContent='저장됨 ✓'; b.disabled=true; toast('멘트함에 저장했어요 · 분류: '+cat);
       };
     });
     $('#sugAgain').onclick = () => $('#sugBtn').click();
