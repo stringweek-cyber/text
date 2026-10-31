@@ -200,6 +200,11 @@
         <button class="btn gray" style="flex:1" id="importBtn">불러오기</button>
       </div>
       <input type="file" id="importFile" accept=".json,application/json" hidden>
+      <p class="muted">카톡 안에서 열었을 때처럼 파일 저장이 안 되면 아래 복사·붙여넣기로 옮기세요.</p>
+      <div class="row">
+        <button class="btn ghost" style="flex:1" id="copyBackupBtn">백업 복사</button>
+        <button class="btn ghost" style="flex:1" id="pasteBackupBtn">붙여넣어 불러오기</button>
+      </div>
     </div>
   </section>
 </div>
@@ -249,6 +254,17 @@
   <div class="row">
     <button class="btn gray" style="flex:1" id="cfmNo">취소</button>
     <button class="btn" style="flex:1;background:var(--del)" id="cfmYes">삭제</button>
+  </div>
+</div></div>
+
+<!-- 백업 복사/붙여넣기 모달 -->
+<div class="mask" id="bkMask"><div class="modal stack">
+  <h2 id="bkTitle"></h2>
+  <p class="muted" id="bkDesc"></p>
+  <textarea id="bkText" style="min-height:160px;font-size:12px"></textarea>
+  <div class="row">
+    <button class="btn gray" id="bkClose">닫기</button>
+    <button class="btn" style="flex:1" id="bkAction"></button>
   </div>
 </div></div>
 
@@ -694,6 +710,43 @@
       saveItems(); toast(`${n}개 불러왔어요`);
     }catch{ toast('불러오기 실패 — 파일을 확인하세요'); }
     e.target.value='';
+  };
+
+  /* ---------- 백업 복사 / 붙여넣어 불러오기 (파일 저장이 안 되는 카톡 브라우저용) ---------- */
+  let bkMode='';
+  $('#copyBackupBtn').onclick=async()=>{
+    const txt=JSON.stringify({app:'mentbox',version:1,items});
+    bkMode='copy';
+    $('#bkTitle').textContent=`백업 복사 (멘트 ${items.length}개)`;
+    $('#bkDesc').textContent='복사한 뒤 크롬·사파리에서 이 앱을 열고, 설정 → "붙여넣어 불러오기"에 붙여넣으세요. 복사가 안 되면 아래 글을 길게 눌러 전체 선택 후 복사하세요.';
+    $('#bkText').value=txt; $('#bkText').readOnly=true;
+    $('#bkAction').textContent='전체 복사';
+    $('#bkMask').classList.add('on');
+  };
+  $('#pasteBackupBtn').onclick=()=>{
+    bkMode='paste';
+    $('#bkTitle').textContent='붙여넣어 불러오기';
+    $('#bkDesc').textContent='"백업 복사"로 복사한 내용을 아래에 붙여넣으세요. 이미 있는 멘트는 중복으로 들어가지 않아요.';
+    $('#bkText').value=''; $('#bkText').readOnly=false;
+    $('#bkAction').textContent='불러오기';
+    $('#bkMask').classList.add('on');
+  };
+  $('#bkClose').onclick=()=>$('#bkMask').classList.remove('on');
+  $('#bkAction').onclick=async()=>{
+    const ta=$('#bkText');
+    if (bkMode==='copy'){
+      ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+      toast(await copyText(ta.value) ? '복사했어요' : '복사 실패 — 길게 눌러 직접 복사하세요');
+      return;
+    }
+    try{
+      const raw=ta.value.replace(/[\u200B-\u200D\uFEFF]/g,'').trim();
+      const data=JSON.parse(raw); const arr=Array.isArray(data)?data:data.items;
+      if(!Array.isArray(arr)) throw 0;
+      const ids=new Set(items.map(i=>i.id)); let n=0;
+      arr.forEach(i=>{ if(i&&typeof i.text==='string'&&!ids.has(i.id)){ items.push({id:i.id||uid(),text:i.text,cat:i.cat||'',uses:i.uses||0,createdAt:i.createdAt||Date.now(),updatedAt:i.updatedAt||Date.now()}); n++; } });
+      saveItems(); $('#bkMask').classList.remove('on'); toast(`${n}개 불러왔어요`);
+    }catch{ toast('불러오기 실패 — 복사한 내용 전체를 붙여넣었는지 확인하세요'); }
   };
 
   /* ---------- util ---------- */
